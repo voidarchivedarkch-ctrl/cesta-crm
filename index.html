@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="theme-color" content="#f5eded"/>
+  <title>CestaCRM</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+    body{font-family:'Sora',sans-serif;background:linear-gradient(145deg,#f5eded 0%,#f0e4e4 60%,#ebe0e0 100%);min-height:100vh;color:#1a0505}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
+
+
+
+/* ═══════════════════════════════════════════════
+   UTILITIES
+═══════════════════════════════════════════════ */
+const R = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v ?? 0);
+const dateBR = (s) => { if (!s) return "—"; const [y,m,d] = s.split("-"); return `${d}/${m}/${y}`; };
+const todayISO = () => new Date().toISOString().slice(0,10);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const startOfWeek  = () => { const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-d.getDay()); return d; };
+const startOfMonth = () => { const d=new Date(); return new Date(d.getFullYear(),d.getMonth(),1); };
+const startOfYear  = () => new Date(new Date().getFullYear(),0,1);
+
+/* ── hook: detect mobile ── */
+const useMobile = () => {
+  const [mobile, setMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const fn = () => setMobile(window.innerWidth < 768);
+    window.addEventListener("resize", fn);
+    return () => window.removeEventListener("resize", fn);
+  }, []);
+  return mobile;
+};
+
+/* ═══════════════════════════════════════════════
+   STATUS
+═══════════════════════════════════════════════ */
+const STATUS = {
+  producao:  { label:"Em Produção", color:"#b45309", bg:"#fef3c7", border:"#fde68a", dot:"#f59e0b" },
+  entregue:  { label:"Entregue",    color:"#1a7a46", bg:"#ecfdf5", border:"#a7f3d0", dot:"#10b981" },
+  cancelado: { label:"Cancelado",   color:"#9f1239", bg:"#fff1f2", border:"#fecdd3", dot:"#f43f5e" },
+};
+
+/* ═══════════════════════════════════════════════
+   PERSISTENCE
+═══════════════════════════════════════════════ */
+const KEYS = { orders:"crm_orders_v3", products:"crm_products_v3" };
+const load = (k) => { try { const r=localStorage.getItem(k); return r?JSON.parse(r):null; } catch { return null; } };
+const persist = (k,v) => { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} };
+
+/* ═══════════════════════════════════════════════
+   ICONS
+═══════════════════════════════════════════════ */
+const ICONS = {
+  dashboard: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,
+  orders:    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>,
+  gift:      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5" rx="1"/><path d="M12 22V7M12 7H7.5a2.5 2.5 0 010-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 000-5C13 2 12 7 12 7z"/></svg>,
+  plus:      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+  edit:      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+  trash:     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>,
+  x:         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>,
+  search:    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>,
+  menu:      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,
+  money:     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,
+  trending:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>,
+  check:     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+  ban:       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>,
+  clock:     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+  factory:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2 20h20M4 20V10l6-4v4l6-4v14"/><path d="M10 20v-4h4v4"/></svg>,
+  empty:     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 15s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>,
+  undo:      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>,
+  filter:    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
+  chevdown:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>,
+};
+const Icon = ({ name, size=18 }) => <span style={{ display:"inline-flex", width:size, height:size, flexShrink:0 }}>{ICONS[name]}</span>;
+
+/* ═══════════════════════════════════════════════
+   TOKENS
+═══════════════════════════════════════════════ */
+const T = {
+  wine:"#500E0E", wine2:"#6b1414", wine3:"#8b1a1a",
+  wineLight:"#f9f0f0", wineMid:"#f0dede",
+  green:"#1a7a46", greenBg:"#ecfdf5",
+  red:"#c0392b",   redBg:"#fdf0f0",
+  amber:"#b45309", amberBg:"#fef3c7",
+  text:"#1a0505",  textMid:"#555", textSoft:"#888", textFaint:"#bbb",
+  border:"#eedede", white:"#ffffff",
+  glass:"rgba(255,255,255,0.78)", glassBorder:"rgba(255,255,255,0.95)",
+};
+
+/* ═══════════════════════════════════════════════
+   BASE COMPONENTS
+═══════════════════════════════════════════════ */
+const Card = ({ children, style:sx, animate, delay=0 }) => (
+  <div style={{ background:T.glass, backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", border:`1px solid ${T.glassBorder}`, borderRadius:18, boxShadow:"0 6px 28px rgba(80,14,14,0.07), 0 1px 0 rgba(255,255,255,0.8) inset", padding:"20px", animation:animate?`fadeUp .4s ease ${delay}s both`:"none", ...sx }}>
+    {children}
+  </div>
+);
+
+const Btn = ({ variant="primary", children, icon, sx:extra, fullWidth, ...props }) => {
+  const [hov,setHov] = useState(false);
+  const base = { display:"inline-flex", alignItems:"center", justifyContent:"center", gap:7, padding:"11px 20px", borderRadius:13, border:"none", fontSize:14, fontWeight:700, fontFamily:"inherit", cursor:props.disabled?"not-allowed":"pointer", transition:"all .18s", userSelect:"none", opacity:props.disabled?0.5:1, width:fullWidth?"100%":"auto" };
+  const vars = {
+    primary: { background:hov?T.wine2:`linear-gradient(135deg,${T.wine},${T.wine2})`, color:"#fff", boxShadow:hov?"0 8px 24px rgba(80,14,14,.38)":"0 4px 14px rgba(80,14,14,.26)", transform:hov?"translateY(-1px)":"none" },
+    ghost:   { background:hov?T.wineLight:"transparent", color:T.wine, border:`1.5px solid ${hov?T.wine:T.border}` },
+    danger:  { background:hov?"#fbd5d5":T.redBg, color:T.red },
+    success: { background:hov?"#bbf7d0":T.greenBg, color:T.green, border:`1.5px solid ${hov?"#6ee7b7":"#a7f3d0"}` },
+    amber:   { background:hov?"#fde68a":T.amberBg, color:T.amber, border:`1.5px solid ${hov?"#fcd34d":"#fde68a"}` },
+  };
+  return (
+    <button {...props} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)} style={{...base,...vars[variant],...extra}}>
+      {icon && <Icon name={icon} size={15}/>}{children}
+    </button>
+  );
+};
+
+const IBtn = ({ name, onClick, color, title, size=38 }) => {
+  const [hov,setHov] = useState(false);
+  const cols = { red:{bg:"#fde8e8",fg:T.red}, green:{bg:"#d1fae5",fg:T.green}, amber:{bg:"#fef3c7",fg:T.amber}, default:{bg:T.wineLight,fg:T.wine} };
+  const c = cols[color]||cols.default;
+  return (
+    <button title={title} onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:size, height:size, borderRadius:11, border:"none", background:hov?c.bg:"#f5eded", color:hov?c.fg:T.textSoft, cursor:"pointer", transition:"all .15s", flexShrink:0 }}>
+      <Icon name={name} size={16}/>
+    </button>
+  );
+};
+
+const StatusBadge = ({ status, small }) => {
+  const s = STATUS[status]||STATUS.producao;
+  return (
+    <span style={{ display:"inline-flex", alignItems:"center", gap:5, padding:small?"3px 8px":"4px 10px", borderRadius:99, fontSize:small?10.5:11.5, fontWeight:700, background:s.bg, color:s.color, border:`1px solid ${s.border}`, whiteSpace:"nowrap" }}>
+      <span style={{ width:5, height:5, borderRadius:"50%", background:s.dot, flexShrink:0 }}/>
+      {s.label}
+    </span>
+  );
+};
+
+const ProfitBadge = ({ value }) => (
+  <span style={{ display:"inline-flex", padding:"3px 9px", borderRadius:99, fontSize:12, fontWeight:700, background:value>=0?T.greenBg:T.redBg, color:value>=0?T.green:T.red }}>
+    {R(value)}
+  </span>
+);
+
+/* ── Modal — slides up from bottom on mobile ── */
+const Modal = ({ open, onClose, title, children, wide }) => {
+  const mobile = useMobile();
+  useEffect(() => { document.body.style.overflow=open?"hidden":""; return ()=>{ document.body.style.overflow=""; }; }, [open]);
+  if (!open) return null;
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:1000, background:"rgba(8,2,2,.62)", backdropFilter:"blur(10px)", display:"flex", alignItems:mobile?"flex-end":"center", justifyContent:"center", padding:mobile?0:16, animation:"fadeIn .15s ease" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:"rgba(255,255,255,.99)", borderRadius:mobile?"22px 22px 0 0":22, padding:mobile?"24px 20px 32px":"28px 32px", width:"100%", maxWidth:mobile?"100%":wide?700:500, maxHeight:mobile?"92vh":"90vh", overflowY:"auto", boxShadow:"0 -8px 60px rgba(80,14,14,.18)", animation:mobile?"slideFromBottom .25s cubic-bezier(.34,1.1,.64,1)":"slideUp .22s cubic-bezier(.34,1.46,.64,1)" }}>
+        {/* drag handle on mobile */}
+        {mobile && <div style={{ width:40, height:4, borderRadius:99, background:"#ddd", margin:"0 auto 20px" }}/>}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:22 }}>
+          <h2 style={{ margin:0, fontSize:18, fontWeight:800, color:T.text, letterSpacing:"-0.02em" }}>{title}</h2>
+          <IBtn name="x" onClick={onClose}/>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+};
+
+const Confirm = ({ open, title, msg, confirmLabel, confirmVariant="danger", onConfirm, onCancel }) => (
+  <Modal open={open} onClose={onCancel} title={title||"Confirmar"}>
+    <p style={{ color:T.textMid, fontSize:14, lineHeight:1.65, marginBottom:24 }}>{msg}</p>
+    <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+      <Btn variant="ghost" onClick={onCancel}>Cancelar</Btn>
+      <Btn variant={confirmVariant} onClick={onConfirm}>{confirmLabel||"Confirmar"}</Btn>
+    </div>
+  </Modal>
+);
+
+const Toast = ({ msg, type, onDone }) => {
+  useEffect(()=>{ if(msg){ const t=setTimeout(onDone,2800); return()=>clearTimeout(t); } },[msg]);
+  if (!msg) return null;
+  return (
+    <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)", zIndex:2000, background:type==="error"?T.red:type==="success"?"#065f46":T.wine, color:"#fff", padding:"12px 22px", borderRadius:99, fontSize:13, fontWeight:600, boxShadow:"0 8px 32px rgba(80,14,14,.35)", animation:"slideUp .2s ease", whiteSpace:"nowrap", maxWidth:"90vw", textAlign:"center" }}>
+      {msg}
+    </div>
+  );
+};
+
+/* form */
+const fb = (f) => `1.5px solid ${f?T.wine:T.border}`;
+const finp = { padding:"12px 14px", borderRadius:12, fontSize:15, fontFamily:"inherit", color:T.text, background:T.white, outline:"none", width:"100%", boxSizing:"border-box", transition:"border-color .18s" };
+
+const FInput = ({ label, hint, ...p }) => {
+  const [f,setF] = useState(false);
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+      {label && <label style={{ fontSize:11, fontWeight:700, color:T.wine, letterSpacing:"0.07em", textTransform:"uppercase" }}>{label}</label>}
+      <input {...p} onFocus={()=>setF(true)} onBlur={()=>setF(false)} style={{ ...finp, border:fb(f), ...p.style }}/>
+      {hint && <span style={{ fontSize:11, color:T.textFaint }}>{hint}</span>}
+    </div>
+  );
+};
+const FSelect = ({ label, children, ...p }) => {
+  const [f,setF] = useState(false);
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+      {label && <label style={{ fontSize:11, fontWeight:700, color:T.wine, letterSpacing:"0.07em", textTransform:"uppercase" }}>{label}</label>}
+      <select {...p} onFocus={()=>setF(true)} onBlur={()=>setF(false)}
+        style={{ ...finp, border:fb(f), padding:"12px 36px 12px 14px", WebkitAppearance:"none", appearance:"none", cursor:"pointer", background:`${T.white} url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center`, ...p.style }}>
+        {children}
+      </select>
+    </div>
+  );
+};
+const FTextarea = ({ label, ...p }) => {
+  const [f,setF] = useState(false);
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+      {label && <label style={{ fontSize:11, fontWeight:700, color:T.wine, letterSpacing:"0.07em", textTransform:"uppercase" }}>{label}</label>}
+      <textarea {...p} onFocus={()=>setF(true)} onBlur={()=>setF(false)} style={{ ...finp, border:fb(f), resize:"vertical", minHeight:78, lineHeight:1.5, ...p.style }}/>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════
+   CHARTS
+═══════════════════════════════════════════════ */
+const BarChart7 = ({ orders }) => {
+  const del = orders.filter(o=>o.status==="entregue");
+  const days = Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); d.setHours(0,0,0,0); const iso=d.toISOString().slice(0,10); return { label:d.toLocaleDateString("pt-BR",{weekday:"short"}).replace(".",""), value:del.filter(o=>o.date===iso).reduce((s,o)=>s+(o.sale||0),0) }; });
+  const max = Math.max(...days.map(d=>d.value),1);
+  if (!days.some(d=>d.value>0)) return <div style={{ height:80, display:"flex", alignItems:"center", justifyContent:"center", color:T.textFaint, fontSize:12 }}>Nenhuma entrega nos últimos 7 dias</div>;
+  return (
+    <div style={{ display:"flex", alignItems:"flex-end", gap:6, height:80 }}>
+      {days.map((d,i)=>(
+        <div key={i} title={`${d.label}: ${R(d.value)}`} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+          <div style={{ width:"100%", height:d.value>0?`${Math.max((d.value/max)*60,4)}px`:"3px", background:d.value>0?`linear-gradient(180deg,${T.wine},${T.wine3}cc)`:T.border, borderRadius:"4px 4px 0 0", boxShadow:d.value>0?`0 0 8px ${T.wine}33`:"none", transition:"height .6s cubic-bezier(.34,1.2,.64,1)" }}/>
+          <span style={{ fontSize:9, color:T.textFaint, textTransform:"capitalize" }}>{d.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const LineChart12 = ({ orders }) => {
+  const del = orders.filter(o=>o.status==="entregue");
+  const now = new Date();
+  const months = Array.from({length:12},(_,i)=>{ const d=new Date(now.getFullYear(),now.getMonth()-(11-i),1); const total=del.filter(o=>{ const od=new Date(o.date); return od.getFullYear()===d.getFullYear()&&od.getMonth()===d.getMonth(); }).reduce((s,o)=>s+(o.sale||0),0); return { label:d.toLocaleDateString("pt-BR",{month:"short"}).replace(".",""), value:total }; });
+  const max = Math.max(...months.map(m=>m.value),1);
+  if (!months.some(m=>m.value>0)) return <div style={{ height:80, display:"flex", alignItems:"center", justifyContent:"center", color:T.textFaint, fontSize:12 }}>Nenhuma entrega registrada ainda</div>;
+  const W=500, H=70;
+  const pts = months.map((m,i)=>({ x:(i/11)*W, y:H-Math.max((m.value/max)*H*0.85,0)-H*0.07, ...m }));
+  const lp = pts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:76, overflow:"visible" }}>
+        <defs><linearGradient id="lg12" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.wine} stopOpacity="0.16"/><stop offset="100%" stopColor={T.wine} stopOpacity="0"/></linearGradient></defs>
+        <path d={`${lp} L${W},${H} L0,${H} Z`} fill="url(#lg12)"/>
+        <path d={lp} fill="none" stroke={T.wine} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        {pts.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r="3" fill={T.wine}><title>{`${p.label}: ${R(p.value)}`}</title></circle>)}
+      </svg>
+      <div style={{ display:"flex" }}>{months.map((m,i)=><div key={i} style={{ flex:1, textAlign:"center", fontSize:9, color:T.textFaint, textTransform:"capitalize" }}>{m.label}</div>)}</div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════
+   PRODUCTION PANEL
+═══════════════════════════════════════════════ */
+const ProductionPanel = ({ orders, onDeliver, onCancel, mobile }) => {
+  const inProd = orders.filter(o=>o.status==="producao").sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if (!inProd.length) return (
+    <div style={{ textAlign:"center", padding:"28px 16px" }}>
+      <div style={{ opacity:.3, color:T.amber, marginBottom:8 }}><Icon name="factory" size={36}/></div>
+      <div style={{ color:T.textFaint, fontSize:13 }}>Nenhum pedido em produção.</div>
+    </div>
+  );
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+      {inProd.map((o,idx)=>{
+        const profit=(o.sale||0)-(o.cost||0);
+        return (
+          <div key={o.id} style={{ borderRadius:14, border:"1.5px solid #fde68a", background:"linear-gradient(135deg,#fffbeb,#fef9e7)", padding:mobile?"14px":"16px 18px", boxShadow:"0 3px 14px rgba(180,83,9,.1)", animation:`fadeUp .4s ease ${idx*.07}s both` }}>
+            {/* header row */}
+            <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10, marginBottom:10 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4, flexWrap:"wrap" }}>
+                  <span style={{ width:7, height:7, borderRadius:"50%", background:"#f59e0b", display:"inline-block", animation:"pulse 1.8s ease infinite", flexShrink:0 }}/>
+                  <span style={{ fontWeight:800, fontSize:15, color:T.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{o.client||"Cliente não informado"}</span>
+                  {o.recipient && <span style={{ fontSize:12, color:T.textSoft }}>→ {o.recipient}</span>}
+                </div>
+                <div style={{ fontSize:13, color:T.textMid, marginBottom:6 }}>{o.product||"Produto não informado"}</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:"6px 14px", fontSize:12, color:T.textSoft }}>
+                  <span>Venda: <strong style={{ color:T.wine }}>{R(o.sale)}</strong></span>
+                  <span>Custo: <strong>{R(o.cost)}</strong></span>
+                  <span>Lucro: <strong style={{ color:profit>=0?T.green:T.red }}>{R(profit)}</strong></span>
+                  <span>Data: <strong>{dateBR(o.date)}</strong></span>
+                </div>
+                {o.ticket && <div style={{ marginTop:7, fontSize:12, color:T.textSoft, fontStyle:"italic", borderLeft:"3px solid #fcd34d", paddingLeft:8 }}>"{o.ticket}"</div>}
+              </div>
+            </div>
+            {/* action buttons */}
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <Btn variant="success" icon="check" sx={{ padding:"9px 16px", fontSize:13, flex:1 }} onClick={()=>onDeliver(o.id)}>Entregue</Btn>
+              <Btn variant="danger"  icon="ban"   sx={{ padding:"9px 14px", fontSize:13, flex:mobile?1:0 }} onClick={()=>onCancel(o.id)}>Cancelar</Btn>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════
+   DASHBOARD
+═══════════════════════════════════════════════ */
+const Dashboard = ({ orders, onDeliver, onCancel }) => {
+  const mobile = useMobile();
+  const inRange = (o,from) => new Date(o.date+"T00:00:00") >= from;
+  const delivered = orders.filter(o=>o.status==="entregue");
+  const wkD = delivered.filter(o=>inRange(o,startOfWeek()));
+  const moD = delivered.filter(o=>inRange(o,startOfMonth()));
+  const yrD = delivered.filter(o=>inRange(o,startOfYear()));
+  const wkA = orders.filter(o=>o.status!=="cancelado"&&inRange(o,startOfWeek()));
+  const moA = orders.filter(o=>o.status!=="cancelado"&&inRange(o,startOfMonth()));
+  const yrA = orders.filter(o=>o.status!=="cancelado"&&inRange(o,startOfYear()));
+  const sumS = arr=>arr.reduce((s,o)=>s+(o.sale||0),0);
+  const sumP = arr=>arr.reduce((s,o)=>s+((o.sale||0)-(o.cost||0)),0);
+  const inProdCount = orders.filter(o=>o.status==="producao").length;
+  const cancelCount = orders.filter(o=>o.status==="cancelado").length;
+
+  const metrics = [
+    { label:"Pedidos — semana",     main:wkA.length,    sub:`${wkD.length} entregue(s)`,       icon:"orders",   delay:0    },
+    { label:"Pedidos — mês",        main:moA.length,    sub:`${moD.length} entregue(s)`,       icon:"orders",   delay:.06  },
+    { label:"Pedidos — ano",        main:yrA.length,    sub:`${yrD.length} entregue(s)`,       icon:"trending", delay:.12  },
+    { label:"Faturamento — semana", main:R(sumS(wkD)),  sub:`Lucro: ${R(sumP(wkD))}`,          icon:"money",    delay:.18  },
+    { label:"Faturamento — mês",    main:R(sumS(moD)),  sub:`Lucro: ${R(sumP(moD))}`,          icon:"money",    delay:.24  },
+    { label:"Faturamento — ano",    main:R(sumS(yrD)),  sub:`Lucro: ${R(sumP(yrD))}`,          icon:"money",    delay:.30  },
+  ];
+
+  const recent = [...orders].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+
+      {/* Status strip */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10 }}>
+        {[
+          { label:"Em Produção",  val:inProdCount,      icon:"clock", bg:T.amberBg, color:T.amber, border:"#fde68a" },
+          { label:"Entregues",    val:delivered.length, icon:"check", bg:T.greenBg, color:T.green, border:"#a7f3d0" },
+          { label:"Cancelados",   val:cancelCount,      icon:"ban",   bg:T.redBg,   color:T.red,   border:"#fecaca" },
+        ].map((s,i)=>(
+          <div key={i} style={{ borderRadius:14, padding:mobile?"12px 10px":"14px 18px", background:s.bg, border:`1.5px solid ${s.border}`, display:"flex", flexDirection:mobile?"column":"row", alignItems:mobile?"center":"center", gap:mobile?6:12, animation:`fadeUp .4s ease ${i*.06}s both`, textAlign:mobile?"center":"left" }}>
+            <div style={{ width:36, height:36, borderRadius:11, background:"rgba(255,255,255,.6)", display:"flex", alignItems:"center", justifyContent:"center", color:s.color, flexShrink:0 }}>
+              <Icon name={s.icon} size={18}/>
+            </div>
+            <div>
+              <div style={{ fontSize:mobile?20:24, fontWeight:800, color:s.color, lineHeight:1 }}>{s.val}</div>
+              <div style={{ fontSize:mobile?9:11, color:s.color, opacity:.75, fontWeight:600, marginTop:2 }}>{s.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Production panel */}
+      {inProdCount > 0 && (
+        <Card animate delay={.2} style={{ padding:0, overflow:"hidden", border:"1.5px solid #fde68a" }}>
+          <div style={{ padding:"13px 16px 11px", borderBottom:"1px solid #fde68a", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ width:7, height:7, borderRadius:"50%", background:"#f59e0b", animation:"pulse 1.8s ease infinite", display:"inline-block" }}/>
+            <span style={{ fontSize:13, fontWeight:700, color:T.amber }}>Em produção — ação necessária ({inProdCount})</span>
+          </div>
+          <div style={{ padding:mobile?"12px":"14px 18px" }}>
+            <ProductionPanel orders={orders} onDeliver={onDeliver} onCancel={onCancel} mobile={mobile}/>
+          </div>
+        </Card>
+      )}
+
+      {/* Metric cards */}
+      <div style={{ display:"grid", gridTemplateColumns:mobile?"1fr 1fr":"repeat(3,1fr)", gap:10 }}>
+        {metrics.map((m,i)=>(
+          <Card key={i} animate delay={m.delay+.3} style={{ position:"relative", overflow:"hidden", padding:mobile?"16px":"18px 22px" }}>
+            <div style={{ position:"absolute", top:12, right:12, opacity:.1, color:T.wine }}><Icon name={m.icon} size={36}/></div>
+            <div style={{ fontSize:10, fontWeight:700, color:T.textFaint, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:6 }}>{m.label}</div>
+            <div style={{ fontSize:mobile?18:22, fontWeight:800, color:T.wine, letterSpacing:"-0.02em", lineHeight:1 }}>{m.main}</div>
+            <div style={{ fontSize:11, color:T.textSoft, marginTop:5 }}>{m.sub}</div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Charts — stack on mobile */}
+      <div style={{ display:"grid", gridTemplateColumns:mobile?"1fr":"1fr 1.6fr", gap:12 }}>
+        <Card animate delay={.65}>
+          <div style={{ fontSize:13, fontWeight:700, color:T.wine, marginBottom:2 }}>Receita — 7 dias</div>
+          <div style={{ fontSize:11, color:T.textFaint, marginBottom:12 }}>Apenas pedidos entregues</div>
+          <BarChart7 orders={orders}/>
+        </Card>
+        <Card animate delay={.7}>
+          <div style={{ fontSize:13, fontWeight:700, color:T.wine, marginBottom:2 }}>Evolução — 12 meses</div>
+          <div style={{ fontSize:11, color:T.textFaint, marginBottom:10 }}>Receita de entregas confirmadas</div>
+          <LineChart12 orders={orders}/>
+        </Card>
+      </div>
+
+      {/* Recent orders — cards on mobile, table on desktop */}
+      <Card animate delay={.75} style={{ padding:0, overflow:"hidden" }}>
+        <div style={{ padding:"16px 18px 12px", borderBottom:`1px solid ${T.wineMid}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span style={{ fontSize:13, fontWeight:700, color:T.wine }}>Pedidos recentes</span>
+          {orders.length>0 && <span style={{ fontSize:11, color:T.textFaint }}>{Math.min(6,orders.length)} de {orders.length}</span>}
+        </div>
+        {recent.length===0 ? (
+          <div style={{ padding:40, textAlign:"center" }}>
+            <div style={{ opacity:.3, marginBottom:8 }}><Icon name="empty" size={36}/></div>
+            <div style={{ color:T.textFaint, fontSize:13 }}>Nenhum pedido ainda.</div>
+          </div>
+        ) : mobile ? (
+          /* Mobile: card list */
+          <div style={{ display:"flex", flexDirection:"column" }}>
+            {recent.map((o,i)=>(
+              <div key={o.id} style={{ padding:"14px 16px", borderTop:i?`1px solid ${T.wineLight}`:"none", opacity:o.status==="cancelado"?.55:1 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:14, color:T.text }}>{o.client||"—"}</div>
+                    <div style={{ fontSize:12, color:T.textMid, marginTop:1 }}>{o.product||"—"}</div>
+                  </div>
+                  <StatusBadge status={o.status} small/>
+                </div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div style={{ display:"flex", gap:10, fontSize:12, color:T.textSoft }}>
+                    <span>{dateBR(o.date)}</span>
+                    {o.recipient && <span>→ {o.recipient}</span>}
+                  </div>
+                  <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                    <span style={{ fontWeight:700, color:T.wine, fontSize:13 }}>{R(o.sale)}</span>
+                    <ProfitBadge value={(o.sale||0)-(o.cost||0)}/>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          /* Desktop: table */
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+              <thead>
+                <tr style={{ background:"rgba(80,14,14,0.03)" }}>
+                  {["Status","Cliente","Produto","Destinatário","Venda","Lucro","Data"].map(h=>(
+                    <th key={h} style={{ padding:"10px 16px", textAlign:"left", fontSize:11, fontWeight:700, color:T.textFaint, letterSpacing:"0.07em", textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {recent.map(o=>(
+                  <tr key={o.id} style={{ borderTop:`1px solid ${T.wineLight}`, transition:"background .14s", opacity:o.status==="cancelado"?.55:1 }}
+                    onMouseEnter={e=>e.currentTarget.style.background=T.wineLight}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <td style={{ padding:"11px 16px" }}><StatusBadge status={o.status}/></td>
+                    <td style={{ padding:"11px 16px", fontWeight:700, color:T.text }}>{o.client||"—"}</td>
+                    <td style={{ padding:"11px 16px", color:T.textMid }}>{o.product||"—"}</td>
+                    <td style={{ padding:"11px 16px", color:T.textMid }}>{o.recipient||"—"}</td>
+                    <td style={{ padding:"11px 16px", fontWeight:700, color:T.wine }}>{R(o.sale)}</td>
+                    <td style={{ padding:"11px 16px" }}>{o.status==="cancelado"?<span style={{ color:T.textFaint }}>—</span>:<ProfitBadge value={(o.sale||0)-(o.cost||0)}/>}</td>
+                    <td style={{ padding:"11px 16px", color:T.textSoft, whiteSpace:"nowrap" }}>{dateBR(o.date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════
+   ORDERS PAGE
+═══════════════════════════════════════════════ */
+const EMPTY_ORDER = { client:"", product:"", recipient:"", cost:"", sale:"", ticket:"", date:"" };
+
+const Orders = ({ orders, setOrders, products, toast }) => {
+  const mobile = useMobile();
+  const [modal,setModal]     = useState(false);
+  const [editing,setEditing] = useState(null);
+  const [form,setForm]       = useState(EMPTY_ORDER);
+  const [search,setSearch]   = useState("");
+  const [dateFrom,setDateFrom] = useState("");
+  const [dateTo,setDateTo]   = useState("");
+  const [statusFilter,setStatusFilter] = useState("all");
+  const [confirmDel,setConfirmDel]     = useState(null);
+  const [confirmAct,setConfirmAct]     = useState(null);
+  const [showFilters,setShowFilters]   = useState(false);
+
+  const setF = (k,v) => setForm(f=>({...f,[k]:v}));
+  const openNew  = () => { setEditing(null); setForm({...EMPTY_ORDER,date:todayISO()}); setModal(true); };
+  const openEdit = o  => { setEditing(o.id); setForm({ client:o.client||"", product:o.product||"", recipient:o.recipient||"", cost:o.cost??"", sale:o.sale??"", ticket:o.ticket||"", date:o.date||todayISO() }); setModal(true); };
+
+  const selectProduct = name => {
+    setF("product", name);
+    const p = products.find(pr=>pr.name===name);
+    if (p) setF("cost", String(p.items.reduce((s,i)=>s+(i.value||0),0)));
+  };
+  const profit = (parseFloat(form.sale)||0) - (parseFloat(form.cost)||0);
+
+  const saveOrder = () => {
+    if (!form.client.trim()&&!form.product.trim()) { toast("Preencha ao menos o cliente ou produto.","error"); return; }
+    const existing = editing ? orders.find(x=>x.id===editing) : null;
+    const o = { id:editing||uid(), client:form.client.trim(), product:form.product.trim(), recipient:form.recipient.trim(), cost:parseFloat(form.cost)||0, sale:parseFloat(form.sale)||0, ticket:form.ticket.trim(), date:form.date||todayISO(), status:existing?.status||"producao", deliveredAt:existing?.deliveredAt };
+    setOrders(prev=>editing?prev.map(x=>x.id===editing?o:x):[o,...prev]);
+    setModal(false);
+    toast(editing?"Pedido atualizado!":"Pedido criado! Em Produção 🎁","success");
+  };
+
+  const deleteOrder = id => { setOrders(prev=>prev.filter(o=>o.id!==id)); setConfirmDel(null); toast("Pedido excluído."); };
+  const changeStatus = (id,status) => {
+    setOrders(prev=>prev.map(o=>o.id===id?{...o,status,deliveredAt:status==="entregue"?todayISO():o.deliveredAt}:o));
+    setConfirmAct(null);
+    const msgs={entregue:"✓ Entrega confirmada! Lucro computado.",cancelado:"Pedido cancelado.",producao:"Pedido reativado."};
+    toast(msgs[status], status==="entregue"?"success":"ok");
+  };
+
+  const filtered = useMemo(()=>{
+    const q=search.toLowerCase().trim();
+    return orders.filter(o=>{
+      const mQ = !q||[o.client,o.product,o.recipient].some(v=>(v||"").toLowerCase().includes(q));
+      const mF = !dateFrom||o.date>=dateFrom;
+      const mT = !dateTo||o.date<=dateTo;
+      const mS = statusFilter==="all"||o.status===statusFilter;
+      return mQ&&mF&&mT&&mS;
+    });
+  },[orders,search,dateFrom,dateTo,statusFilter]);
+
+  const delFiltered = filtered.filter(o=>o.status==="entregue");
+  const totalS = delFiltered.reduce((s,o)=>s+(o.sale||0),0);
+  const totalP = delFiltered.reduce((s,o)=>s+((o.sale||0)-(o.cost||0)),0);
+  const hasFilter = search||dateFrom||dateTo||statusFilter!=="all";
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+
+      {/* Toolbar */}
+      <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+        <Btn icon="plus" onClick={openNew} sx={mobile?{flex:1,justifyContent:"center"}:{}}>Adicionar Pedido</Btn>
+        {mobile ? (
+          <button onClick={()=>setShowFilters(!showFilters)}
+            style={{ display:"flex", alignItems:"center", gap:6, padding:"10px 14px", borderRadius:12, border:`1.5px solid ${hasFilter?T.wine:T.border}`, background:hasFilter?T.wineLight:"rgba(255,255,255,.8)", color:hasFilter?T.wine:T.textSoft, fontSize:13, fontWeight:600, fontFamily:"inherit", cursor:"pointer" }}>
+            <Icon name="filter" size={14}/> Filtros {hasFilter?"●":""}
+          </button>
+        ) : (
+          <>
+            {/* Status tabs */}
+            <div style={{ display:"flex", gap:3, background:"rgba(255,255,255,.72)", borderRadius:11, padding:3, border:`1px solid ${T.border}` }}>
+              {[["all","Todos"],["producao","Produção"],["entregue","Entregues"],["cancelado","Cancelados"]].map(([val,lbl])=>(
+                <button key={val} onClick={()=>setStatusFilter(val)}
+                  style={{ padding:"6px 12px", borderRadius:9, border:"none", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit", transition:"all .15s", background:statusFilter===val?T.wine:"transparent", color:statusFilter===val?"#fff":T.textSoft }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            {/* Search */}
+            <div style={{ position:"relative" }}>
+              <span style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:T.textFaint, pointerEvents:"none" }}><Icon name="search" size={13}/></span>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar…"
+                style={{ padding:"9px 12px 9px 30px", borderRadius:11, border:`1.5px solid ${T.border}`, fontSize:13, fontFamily:"inherit", outline:"none", width:170, background:"rgba(255,255,255,.85)", color:T.text }}
+                onFocus={e=>e.target.style.borderColor=T.wine} onBlur={e=>e.target.style.borderColor=T.border}/>
+            </div>
+            {/* Date range */}
+            {[dateFrom,dateTo].map((val,idx)=>(
+              <input key={idx} type="date" value={val} onChange={e=>idx===0?setDateFrom(e.target.value):setDateTo(e.target.value)}
+                style={{ padding:"9px 10px", borderRadius:11, border:`1.5px solid ${T.border}`, fontSize:12, fontFamily:"inherit", outline:"none", background:"rgba(255,255,255,.85)", color:val?T.text:T.textFaint }}
+                onFocus={e=>e.target.style.borderColor=T.wine} onBlur={e=>e.target.style.borderColor=T.border}/>
+            ))}
+            {hasFilter && <Btn variant="ghost" onClick={()=>{setSearch("");setDateFrom("");setDateTo("");setStatusFilter("all");}}>Limpar</Btn>}
+          </>
+        )}
+      </div>
+
+      {/* Mobile filter panel */}
+      {mobile && showFilters && (
+        <Card style={{ padding:"16px", display:"flex", flexDirection:"column", gap:12 }}>
+          {/* Status chips */}
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:T.wine, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:8 }}>Status</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+              {[["all","Todos"],["producao","Produção"],["entregue","Entregues"],["cancelado","Cancelados"]].map(([val,lbl])=>(
+                <button key={val} onClick={()=>setStatusFilter(val)}
+                  style={{ padding:"7px 14px", borderRadius:99, border:`1.5px solid ${statusFilter===val?T.wine:T.border}`, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", background:statusFilter===val?T.wine:"transparent", color:statusFilter===val?"#fff":T.textSoft }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Search */}
+          <div style={{ position:"relative" }}>
+            <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", color:T.textFaint, pointerEvents:"none" }}><Icon name="search" size={14}/></span>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar cliente ou produto…"
+              style={{ ...finp, paddingLeft:36, border:`1.5px solid ${T.border}` }}
+              onFocus={e=>e.target.style.borderColor=T.wine} onBlur={e=>e.target.style.borderColor=T.border}/>
+          </div>
+          {/* Date range */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            <FInput label="De" type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}/>
+            <FInput label="Até" type="date" value={dateTo}   onChange={e=>setDateTo(e.target.value)}/>
+          </div>
+          {hasFilter && <Btn variant="ghost" fullWidth onClick={()=>{setSearch("");setDateFrom("");setDateTo("");setStatusFilter("all");setShowFilters(false);}}>Limpar filtros</Btn>}
+        </Card>
+      )}
+
+      {/* LIST */}
+      {mobile ? (
+        /* Mobile: card list */
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {filtered.length===0 && (
+            <Card style={{ textAlign:"center", padding:40 }}>
+              <div style={{ opacity:.3, marginBottom:10 }}><Icon name="empty" size={36}/></div>
+              <div style={{ color:T.textFaint, fontSize:13 }}>{orders.length===0?"Nenhum pedido cadastrado.":"Nenhum pedido com esses filtros."}</div>
+            </Card>
+          )}
+          {filtered.map(o=>{
+            const pr=(o.sale||0)-(o.cost||0);
+            const isCanceled=o.status==="cancelado";
+            return (
+              <Card key={o.id} style={{ padding:"16px", opacity:isCanceled?.6:1 }}>
+                {/* top row */}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontWeight:700, fontSize:15, color:T.text, marginBottom:2 }}>{o.client||<em style={{ color:T.textFaint, fontStyle:"normal" }}>Sem cliente</em>}</div>
+                    <div style={{ fontSize:13, color:T.textMid }}>{o.product||<em style={{ color:T.textFaint, fontStyle:"normal" }}>Sem produto</em>}</div>
+                  </div>
+                  <StatusBadge status={o.status} small/>
+                </div>
+                {/* info grid */}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 12px", fontSize:12, color:T.textSoft, marginBottom:12 }}>
+                  {o.recipient && <div><span style={{ color:T.textFaint }}>Destinatário: </span><strong style={{ color:T.textMid }}>{o.recipient}</strong></div>}
+                  <div><span style={{ color:T.textFaint }}>Data: </span><strong>{dateBR(o.date)}</strong></div>
+                  <div><span style={{ color:T.textFaint }}>Custo: </span><strong>{R(o.cost)}</strong></div>
+                  <div><span style={{ color:T.textFaint }}>Venda: </span><strong style={{ color:T.wine }}>{R(o.sale)}</strong></div>
+                  {!isCanceled && <div style={{ gridColumn:"1/-1" }}><span style={{ color:T.textFaint }}>Lucro: </span><ProfitBadge value={pr}/></div>}
+                </div>
+                {/* actions */}
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <IBtn name="edit" onClick={()=>openEdit(o)} title="Editar" size={38}/>
+                  {o.status==="producao" && <>
+                    <Btn variant="success" icon="check" sx={{ flex:1, padding:"8px 10px", fontSize:12 }} onClick={()=>setConfirmAct({id:o.id,action:"entregue"})}>Entregue</Btn>
+                    <Btn variant="danger"  icon="ban"   sx={{ padding:"8px 12px", fontSize:12 }}         onClick={()=>setConfirmAct({id:o.id,action:"cancelado"})}>Cancelar</Btn>
+                  </>}
+                  {(o.status==="entregue"||o.status==="cancelado") && (
+                    <Btn variant="amber" icon="undo" sx={{ flex:1, padding:"8px 10px", fontSize:12 }} onClick={()=>setConfirmAct({id:o.id,action:"producao"})}>Reativar</Btn>
+                  )}
+                  <IBtn name="trash" onClick={()=>setConfirmDel(o.id)} color="red" title="Excluir" size={38}/>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        /* Desktop: table */
+        <Card style={{ padding:0, overflow:"hidden" }}>
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+              <thead>
+                <tr style={{ background:"rgba(80,14,14,0.03)" }}>
+                  {["Status","Cliente","Produto","Destinatário","Custo","Venda","Lucro","Data","Ações"].map(h=>(
+                    <th key={h} style={{ padding:"13px 14px", textAlign:"left", fontSize:11, fontWeight:700, color:T.textFaint, letterSpacing:"0.07em", textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length===0 && (
+                  <tr><td colSpan={9} style={{ padding:"52px 16px", textAlign:"center" }}>
+                    <div style={{ opacity:.3, marginBottom:10 }}><Icon name="empty" size={40}/></div>
+                    <div style={{ color:T.textFaint, fontSize:13 }}>{orders.length===0?"Nenhum pedido cadastrado.":"Nenhum pedido com esses filtros."}</div>
+                  </td></tr>
+                )}
+                {filtered.map(o=>{
+                  const pr=(o.sale||0)-(o.cost||0);
+                  const isCanceled=o.status==="cancelado";
+                  return (
+                    <tr key={o.id} style={{ borderTop:`1px solid ${T.wineLight}`, transition:"background .14s", opacity:isCanceled?.58:1 }}
+                      onMouseEnter={e=>e.currentTarget.style.background=T.wineLight}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <td style={{ padding:"12px 14px" }}><StatusBadge status={o.status}/></td>
+                      <td style={{ padding:"12px 14px", fontWeight:700, color:T.text }}>{o.client||"—"}</td>
+                      <td style={{ padding:"12px 14px", color:T.textMid }}>{o.product||"—"}</td>
+                      <td style={{ padding:"12px 14px", color:T.textMid }}>{o.recipient||"—"}</td>
+                      <td style={{ padding:"12px 14px", color:T.textSoft }}>{R(o.cost)}</td>
+                      <td style={{ padding:"12px 14px", fontWeight:700, color:T.wine }}>{R(o.sale)}</td>
+                      <td style={{ padding:"12px 14px" }}>{isCanceled?<span style={{ color:T.textFaint }}>—</span>:<ProfitBadge value={pr}/>}</td>
+                      <td style={{ padding:"12px 14px", color:T.textSoft, whiteSpace:"nowrap" }}>{dateBR(o.date)}</td>
+                      <td style={{ padding:"12px 14px" }}>
+                        <div style={{ display:"flex", gap:4 }}>
+                          <IBtn name="edit" onClick={()=>openEdit(o)} title="Editar"/>
+                          {o.status==="producao" && <>
+                            <IBtn name="check" onClick={()=>setConfirmAct({id:o.id,action:"entregue"})} color="green" title="Confirmar entrega"/>
+                            <IBtn name="ban"   onClick={()=>setConfirmAct({id:o.id,action:"cancelado"})} color="red" title="Cancelar"/>
+                          </>}
+                          {(o.status==="entregue"||o.status==="cancelado") && (
+                            <IBtn name="undo" onClick={()=>setConfirmAct({id:o.id,action:"producao"})} color="amber" title="Voltar para produção"/>
+                          )}
+                          <IBtn name="trash" onClick={()=>setConfirmDel(o.id)} color="red" title="Excluir"/>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {delFiltered.length>0 && (
+            <div style={{ padding:"12px 16px", borderTop:`1px solid ${T.wineMid}`, display:"flex", gap:18, flexWrap:"wrap", justifyContent:"flex-end", background:"rgba(80,14,14,.02)", alignItems:"center" }}>
+              <span style={{ fontSize:11, color:T.textFaint }}>Entregas no filtro:</span>
+              {[["Qtd",delFiltered.length],["Receita",R(totalS)],["Lucro realizado",R(totalP)]].map(([k,v])=>(
+                <div key={k} style={{ display:"flex", gap:5, alignItems:"center" }}>
+                  <span style={{ fontSize:11, color:T.textFaint, textTransform:"uppercase", letterSpacing:"0.05em", fontWeight:600 }}>{k}</span>
+                  <span style={{ fontSize:14, fontWeight:800, color:T.wine }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Mobile footer summary */}
+      {mobile && delFiltered.length>0 && (
+        <Card style={{ padding:"14px 16px" }}>
+          <div style={{ fontSize:11, fontWeight:700, color:T.textFaint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10 }}>Resumo do filtro atual</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+            {[["Pedidos",delFiltered.length],["Receita",R(totalS)],["Lucro",R(totalP)]].map(([k,v])=>(
+              <div key={k} style={{ textAlign:"center" }}>
+                <div style={{ fontSize:16, fontWeight:800, color:T.wine }}>{v}</div>
+                <div style={{ fontSize:10, color:T.textFaint, marginTop:2 }}>{k}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Modal */}
+      <Modal open={modal} onClose={()=>setModal(false)} title={editing?"Editar Pedido":"Novo Pedido"}>
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          {!editing && (
+            <div style={{ padding:"10px 14px", borderRadius:11, background:T.amberBg, border:"1px solid #fde68a", fontSize:13, color:T.amber, fontWeight:600, display:"flex", alignItems:"center", gap:8 }}>
+              <Icon name="clock" size={14}/>
+              Novo pedido entra como <strong>Em Produção</strong>.
+            </div>
+          )}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <FInput label="Cliente" value={form.client}    onChange={e=>setF("client",e.target.value)}    placeholder="Nome do cliente"/>
+            <FInput label="Destinatário" value={form.recipient} onChange={e=>setF("recipient",e.target.value)} placeholder="Ex: Mãe"/>
+          </div>
+          <FSelect label="Produto / Cesta" value={form.product} onChange={e=>selectProduct(e.target.value)}>
+            <option value="">Selecionar produto cadastrado…</option>
+            {products.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+            <option value="__outro__">— Digitar manualmente —</option>
+          </FSelect>
+          {(form.product==="__outro__"||(form.product&&!products.find(p=>p.name===form.product))) && (
+            <FInput label="Nome do produto (manual)" value={form.product==="__outro__"?"":form.product} onChange={e=>setF("product",e.target.value)} placeholder="Nome do presente ou cesta"/>
+          )}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <FInput label="Custo (R$)"  type="number" step="0.01" min="0" value={form.cost} onChange={e=>setF("cost",e.target.value)}  placeholder="0,00" hint="Custo dos itens"/>
+            <FInput label="Venda (R$)"  type="number" step="0.01" min="0" value={form.sale} onChange={e=>setF("sale",e.target.value)}  placeholder="0,00"/>
+          </div>
+          <div style={{ padding:"12px 14px", borderRadius:12, background:profit>=0?T.greenBg:T.redBg, fontSize:15, fontWeight:800, color:profit>=0?T.green:T.red, border:`1.5px solid ${profit>=0?"#a7f3d0":"#fecaca"}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span style={{ fontSize:12, fontWeight:600, opacity:.7 }}>Lucro previsto</span>
+            {R(profit)}
+          </div>
+          <FInput label="Data do pedido" type="date" value={form.date} onChange={e=>setF("date",e.target.value)}/>
+          <FTextarea label="Bilhete / Mensagem" value={form.ticket} onChange={e=>setF("ticket",e.target.value)} placeholder="Mensagem personalizada para o destinatário…"/>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, paddingTop:4 }}>
+            <Btn variant="ghost" onClick={()=>setModal(false)} fullWidth>Cancelar</Btn>
+            <Btn onClick={saveOrder} fullWidth>{editing?"Salvar":"Criar pedido"}</Btn>
+          </div>
+        </div>
+      </Modal>
+
+      <Confirm open={!!confirmDel} title="Excluir pedido" msg="Tem certeza? Esta ação não pode ser desfeita." confirmLabel="Excluir" confirmVariant="danger" onConfirm={()=>deleteOrder(confirmDel)} onCancel={()=>setConfirmDel(null)}/>
+      <Confirm
+        open={!!confirmAct}
+        title={confirmAct?.action==="entregue"?"Confirmar entrega":confirmAct?.action==="cancelado"?"Cancelar pedido":"Reativar pedido"}
+        msg={confirmAct?.action==="entregue"?"Confirmar que este pedido foi entregue? O lucro será computado nos relatórios.":confirmAct?.action==="cancelado"?"Cancelar este pedido? Ele não será contabilizado no faturamento.":"Reativar este pedido colocando-o de volta em produção?"}
+        confirmLabel={confirmAct?.action==="entregue"?"✓ Confirmar entrega":confirmAct?.action==="cancelado"?"Cancelar pedido":"Reativar"}
+        confirmVariant={confirmAct?.action==="entregue"?"success":confirmAct?.action==="cancelado"?"danger":"amber"}
+        onConfirm={()=>changeStatus(confirmAct.id,confirmAct.action)}
+        onCancel={()=>setConfirmAct(null)}/>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════
+   PRODUCTS PAGE
+═══════════════════════════════════════════════ */
+const EMPTY_ITEM = () => ({ id:uid(), name:"", value:"" });
+
+const Products = ({ products, setProducts, toast }) => {
+  const mobile = useMobile();
+  const [modal,setModal]     = useState(false);
+  const [editing,setEditing] = useState(null);
+  const [form,setForm]       = useState({ name:"", items:[] });
+  const [confirmId,setConfirmId] = useState(null);
+
+  const openNew  = () => { setEditing(null); setForm({ name:"", items:[EMPTY_ITEM()] }); setModal(true); };
+  const openEdit = p  => { setEditing(p.id); setForm({ name:p.name, items:p.items.map(i=>({...i,value:String(i.value)})) }); setModal(true); };
+  const addItem    = () => setForm(f=>({...f,items:[...f.items,EMPTY_ITEM()]}));
+  const removeItem = id => setForm(f=>({...f,items:f.items.filter(i=>i.id!==id)}));
+  const updItem    = (id,k,v) => setForm(f=>({...f,items:f.items.map(i=>i.id===id?{...i,[k]:v}:i)}));
+  const totalCost = form.items.reduce((s,i)=>s+(parseFloat(i.value)||0),0);
+
+  const saveProduct = () => {
+    if (!form.name.trim()) { toast("Informe o nome do produto.","error"); return; }
+    const clean = form.items.filter(i=>i.name.trim()).map(i=>({ id:i.id, name:i.name.trim(), value:parseFloat(i.value)||0 }));
+    const p = { id:editing||uid(), name:form.name.trim(), items:clean };
+    setProducts(prev=>editing?prev.map(x=>x.id===editing?p:x):[p,...prev]);
+    setModal(false);
+    toast(editing?"Produto atualizado!":"Produto cadastrado!","success");
+  };
+  const deleteProduct = id => { setProducts(prev=>prev.filter(p=>p.id!==id)); setConfirmId(null); toast("Produto excluído."); };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      <Btn icon="plus" onClick={openNew} fullWidth={mobile}>Cadastrar Produto</Btn>
+
+      {products.length===0 ? (
+        <Card style={{ textAlign:"center", padding:52 }}>
+          <div style={{ opacity:.3, marginBottom:12 }}><Icon name="gift" size={44}/></div>
+          <div style={{ color:T.textFaint, fontSize:14 }}>Nenhum produto cadastrado.</div>
+          <div style={{ color:T.textFaint, fontSize:12, marginTop:6 }}>Clique em <strong>Cadastrar Produto</strong>.</div>
+        </Card>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:mobile?"1fr":"repeat(auto-fill,minmax(290px,1fr))", gap:12 }}>
+          {products.map((p,idx)=>{
+            const cost=p.items.reduce((s,i)=>s+(i.value||0),0);
+            return (
+              <Card key={p.id} animate delay={idx*.06}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
+                  <div>
+                    <div style={{ fontWeight:800, fontSize:16, color:T.text }}>{p.name}</div>
+                    <div style={{ fontSize:11, color:T.textFaint, marginTop:3 }}>{p.items.length} {p.items.length===1?"item":"itens"}</div>
+                  </div>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <IBtn name="edit"  onClick={()=>openEdit(p)} title="Editar"/>
+                    <IBtn name="trash" onClick={()=>setConfirmId(p.id)} color="red" title="Excluir"/>
+                  </div>
+                </div>
+                {p.items.length===0 ? (
+                  <div style={{ color:T.textFaint, fontSize:12, padding:"8px 0" }}>Sem itens cadastrados</div>
+                ) : (
+                  <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                    {p.items.map(item=>(
+                      <div key={item.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px", background:T.wineLight, borderRadius:10, fontSize:13 }}>
+                        <span style={{ color:T.textMid }}>{item.name}</span>
+                        <span style={{ fontWeight:700, color:T.wine }}>{R(item.value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ marginTop:14, paddingTop:12, borderTop:`1px solid ${T.wineMid}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <span style={{ fontSize:11, fontWeight:700, color:T.textFaint, textTransform:"uppercase", letterSpacing:"0.07em" }}>Custo total</span>
+                  <span style={{ fontSize:20, fontWeight:800, color:T.wine }}>{R(cost)}</span>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      <Modal open={modal} onClose={()=>setModal(false)} title={editing?"Editar Produto":"Cadastrar Produto"} wide>
+        <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+          <FInput label="Nome da cesta / presente" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="Ex: Cesta de Coração"/>
+          <div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <label style={{ fontSize:11, fontWeight:700, color:T.wine, letterSpacing:"0.07em", textTransform:"uppercase" }}>Itens da cesta</label>
+              <Btn variant="ghost" icon="plus" sx={{ padding:"6px 12px", fontSize:12 }} onClick={addItem}>Adicionar item</Btn>
+            </div>
+            {form.items.length===0 ? (
+              <div style={{ padding:18, textAlign:"center", color:T.textFaint, fontSize:13, background:T.wineLight, borderRadius:12 }}>Clique em "Adicionar item".</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {form.items.map((item,idx)=>(
+                  <div key={item.id} style={{ display:"grid", gridTemplateColumns:"1fr 110px 38px", gap:8, alignItems:"center" }}>
+                    <input value={item.name} onChange={e=>updItem(item.id,"name",e.target.value)} placeholder={`Item ${idx+1}`}
+                      style={{ ...finp, border:`1.5px solid ${T.border}`, padding:"10px 12px", fontSize:13 }}
+                      onFocus={e=>e.target.style.borderColor=T.wine} onBlur={e=>e.target.style.borderColor=T.border}/>
+                    <input type="number" step="0.01" min="0" value={item.value} onChange={e=>updItem(item.id,"value",e.target.value)} placeholder="R$ 0,00"
+                      style={{ ...finp, border:`1.5px solid ${T.border}`, padding:"10px 12px", fontSize:13 }}
+                      onFocus={e=>e.target.style.borderColor=T.wine} onBlur={e=>e.target.style.borderColor=T.border}/>
+                    <button onClick={()=>removeItem(item.id)}
+                      style={{ width:38, height:38, borderRadius:10, border:"none", background:"#fde8e8", color:T.red, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+                      onMouseEnter={e=>e.currentTarget.style.background="#fbd0d0"} onMouseLeave={e=>e.currentTarget.style.background="#fde8e8"}>
+                      <Icon name="x" size={13}/>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 16px", background:T.wineLight, borderRadius:13, border:`1.5px solid ${T.wineMid}` }}>
+            <span style={{ fontSize:13, fontWeight:600, color:T.textSoft }}>Custo total calculado</span>
+            <span style={{ fontSize:22, fontWeight:800, color:T.wine }}>{R(totalCost)}</span>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            <Btn variant="ghost" onClick={()=>setModal(false)} fullWidth>Cancelar</Btn>
+            <Btn onClick={saveProduct} fullWidth>{editing?"Salvar alterações":"Cadastrar produto"}</Btn>
+          </div>
+        </div>
+      </Modal>
+      <Confirm open={!!confirmId} title="Excluir produto" msg="Pedidos existentes não serão afetados." confirmLabel="Excluir" onConfirm={()=>deleteProduct(confirmId)} onCancel={()=>setConfirmId(null)}/>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════
+   BOTTOM NAV ITEM (mobile)
+═══════════════════════════════════════════════ */
+const BottomNavItem = ({ n, active, onClick, badge }) => {
+  return (
+    <button onClick={onClick} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"8px 4px 4px", border:"none", background:"transparent", cursor:"pointer", fontFamily:"inherit", position:"relative" }}>
+      <div style={{ width:40, height:36, borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", background:active?T.wine:"transparent", color:active?"#fff":T.textSoft, transition:"all .2s" }}>
+        <Icon name={n.icon} size={20}/>
+      </div>
+      <span style={{ fontSize:10, fontWeight:600, color:active?T.wine:T.textFaint, transition:"color .2s" }}>{n.label}</span>
+      {badge>0 && (
+        <div style={{ position:"absolute", top:6, right:"50%", transform:"translateX(10px)", minWidth:16, height:16, borderRadius:99, background:T.amber, color:"#fff", fontSize:9.5, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", boxShadow:"0 2px 6px rgba(180,83,9,.4)" }}>{badge}</div>
+      )}
+    </button>
+  );
+};
+
+/* ═══════════════════════════════════════════════
+   SIDEBAR NAV ITEM (desktop)
+═══════════════════════════════════════════════ */
+const NavItem = ({ n, active, onClick, badge }) => {
+  const [hov,setHov] = useState(false);
+  return (
+    <button onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{ display:"flex", alignItems:"center", gap:11, padding:"11px 14px", borderRadius:14, border:"none", width:"100%", textAlign:"left", fontFamily:"inherit", fontSize:14, fontWeight:600, cursor:"pointer", transition:"all .18s", background:active?`linear-gradient(135deg,${T.wine},${T.wine2})`:hov?T.wineLight:"transparent", color:active?"#fff":hov?T.wine:T.textSoft, boxShadow:active?"0 6px 20px rgba(80,14,14,.26)":"none" }}>
+      <Icon name={n.icon} size={17}/>
+      {n.label}
+      {badge>0 && (
+        <span style={{ marginLeft:"auto", minWidth:20, height:20, borderRadius:99, background:active?"rgba(255,255,255,.25)":T.amberBg, color:active?"#fff":T.amber, fontSize:11, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 6px" }}>{badge}</span>
+      )}
+    </button>
+  );
+};
+
+/* ═══════════════════════════════════════════════
+   ROOT APP
+═══════════════════════════════════════════════ */
+function App() {
+  const mobile = useMobile();
+  const [tab,setTab]         = useState("dashboard");
+  const [menuOpen,setMenuOpen] = useState(false);
+  const [toastMsg,setToastMsg] = useState("");
+  const [toastType,setToastType] = useState("ok");
+
+  const [orders,setOrdersRaw]     = useState(()=>load(KEYS.orders)||[]);
+  const [products,setProductsRaw] = useState(()=>load(KEYS.products)||[]);
+
+  const setOrders   = useCallback(fn=>{ setOrdersRaw(prev=>{ const next=typeof fn==="function"?fn(prev):fn; persist(KEYS.orders,next);   return next; }); },[]);
+  const setProducts = useCallback(fn=>{ setProductsRaw(prev=>{ const next=typeof fn==="function"?fn(prev):fn; persist(KEYS.products,next); return next; }); },[]);
+
+  const toast = (msg,type="ok") => { setToastMsg(msg); setToastType(type); };
+
+  const handleDeliver = useCallback(id=>{ setOrders(prev=>prev.map(o=>o.id===id?{...o,status:"entregue",deliveredAt:todayISO()}:o)); toast("✓ Entregue! Lucro computado.","success"); },[setOrders]);
+  const handleCancel  = useCallback(id=>{ setOrders(prev=>prev.map(o=>o.id===id?{...o,status:"cancelado"}:o)); toast("Pedido cancelado."); },[setOrders]);
+
+  const inProdCount = orders.filter(o=>o.status==="producao").length;
+  const nav = [
+    { id:"dashboard", label:"Dashboard", icon:"dashboard" },
+    { id:"orders",    label:"Pedidos",   icon:"orders",  badge:inProdCount },
+    { id:"products",  label:"Produtos",  icon:"gift" },
+  ];
+
+  const titles = { dashboard:"Dashboard", orders:"Pedidos", products:"Produtos" };
+
+  return (
+    <>
+      <style>{`
+        /* font loaded via link tag */
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        html,body{height:100%;-webkit-tap-highlight-color:transparent}
+        body{font-family:'Sora',sans-serif;background:linear-gradient(145deg,#f5eded 0%,#f0e4e4 60%,#ebe0e0 100%);min-height:100vh;color:#1a0505;overscroll-behavior:none}
+        ::-webkit-scrollbar{width:4px;height:4px}
+        ::-webkit-scrollbar-thumb{background:#dcc8c8;border-radius:99px}
+        @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+        @keyframes slideUp{from{opacity:0;transform:translateY(26px) scale(.97)}to{opacity:1;transform:none}}
+        @keyframes slideFromBottom{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:none}}
+        @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(1.3)}}
+        input[type="date"]::-webkit-calendar-picker-indicator{opacity:.45;cursor:pointer}
+        input[type="number"]::-webkit-inner-spin-button,input[type="number"]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+        button{-webkit-tap-highlight-color:transparent}
+        /* safe area on iOS */
+        .bottom-nav{padding-bottom:env(safe-area-inset-bottom,0px)}
+      `}</style>
+
+      {/* BG blobs */}
+      <div style={{ position:"fixed",inset:0,pointerEvents:"none",zIndex:0,overflow:"hidden" }}>
+        <div style={{ position:"absolute",top:-160,right:-100,width:480,height:480,borderRadius:"50%",background:"radial-gradient(circle,rgba(80,14,14,.08) 0%,transparent 68%)" }}/>
+        <div style={{ position:"absolute",bottom:-100,left:-80,width:360,height:360,borderRadius:"50%",background:"radial-gradient(circle,rgba(80,14,14,.05) 0%,transparent 68%)" }}/>
+      </div>
+
+      <div style={{ display:"flex", minHeight:"100vh", position:"relative", zIndex:1 }}>
+
+        {/* ── DESKTOP SIDEBAR ── */}
+        {!mobile && (
+          <aside style={{ width:240, flexShrink:0, position:"fixed", top:0, left:0, bottom:0, zIndex:50, display:"flex", flexDirection:"column", background:"rgba(255,255,255,.68)", backdropFilter:"blur(28px)", WebkitBackdropFilter:"blur(28px)", borderRight:"1px solid rgba(255,255,255,.9)", boxShadow:"4px 0 28px rgba(80,14,14,.08)", padding:"26px 14px", gap:4 }}>
+            {/* Logo */}
+            <div style={{ display:"flex", alignItems:"center", gap:12, padding:"0 10px 26px" }}>
+              <div style={{ width:40, height:40, borderRadius:14, flexShrink:0, background:`linear-gradient(135deg,${T.wine},${T.wine3})`, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 6px 20px rgba(80,14,14,.32)", color:"#fff" }}>
+                <Icon name="gift" size={20}/>
+              </div>
+              <div>
+                <div style={{ fontSize:15, fontWeight:900, color:T.text, letterSpacing:"-0.03em" }}>CestaCRM</div>
+                <div style={{ fontSize:9.5, color:T.textFaint, letterSpacing:"0.1em", fontWeight:600, textTransform:"uppercase" }}>Gestão de Presentes</div>
+              </div>
+            </div>
+            <div style={{ fontSize:9.5, fontWeight:700, color:T.textFaint, letterSpacing:"0.12em", padding:"0 12px 8px", textTransform:"uppercase" }}>Menu</div>
+            {nav.map(n=><NavItem key={n.id} n={n} active={tab===n.id} badge={n.badge} onClick={()=>setTab(n.id)}/>)}
+            {/* Summary */}
+            <div style={{ marginTop:"auto" }}>
+              <div style={{ padding:14, borderRadius:14, background:T.wineLight, border:`1px solid ${T.wineMid}` }}>
+                <div style={{ fontSize:10, fontWeight:700, color:T.textFaint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>Resumo geral</div>
+                {[
+                  ["Total pedidos",   orders.length],
+                  ["Em produção",     orders.filter(o=>o.status==="producao").length],
+                  ["Entregues",       orders.filter(o=>o.status==="entregue").length],
+                  ["Cancelados",      orders.filter(o=>o.status==="cancelado").length],
+                  ["Lucro realizado", R(orders.filter(o=>o.status==="entregue").reduce((s,o)=>s+((o.sale||0)-(o.cost||0)),0))],
+                ].map(([k,v])=>(
+                  <div key={k} style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginTop:5 }}>
+                    <span style={{ color:T.textSoft }}>{k}</span>
+                    <span style={{ fontWeight:700, color:T.wine, fontSize:11 }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </aside>
+        )}
+
+        {/* ── MAIN ── */}
+        <div style={{ flex:1, marginLeft:mobile?0:240, display:"flex", flexDirection:"column", minHeight:"100vh" }}>
+
+          {/* Topbar */}
+          <header style={{ position:"sticky", top:0, zIndex:40, height:mobile?56:62, display:"flex", alignItems:"center", justifyContent:"space-between", padding:mobile?"0 16px":"0 28px", background:"rgba(245,237,237,.92)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)", borderBottom:"1px solid rgba(255,255,255,.7)" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:mobile?10:14 }}>
+              {/* Mobile logo */}
+              {mobile && (
+                <div style={{ width:34, height:34, borderRadius:11, background:`linear-gradient(135deg,${T.wine},${T.wine3})`, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", flexShrink:0 }}>
+                  <Icon name="gift" size={17}/>
+                </div>
+              )}
+              <div>
+                <div style={{ fontSize:mobile?16:18, fontWeight:800, color:T.text, letterSpacing:"-0.02em", lineHeight:1.1 }}>{titles[tab]}</div>
+                {!mobile && <div style={{ fontSize:11, color:T.textFaint }}>{new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long",year:"numeric"})}</div>}
+              </div>
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              {inProdCount>0 && (
+                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:99, background:T.amberBg, border:"1px solid #fde68a", cursor:"pointer" }} onClick={()=>setTab("orders")}>
+                  <span style={{ width:6, height:6, borderRadius:"50%", background:"#f59e0b", animation:"pulse 1.8s ease infinite", display:"inline-block" }}/>
+                  <span style={{ fontSize:mobile?11:12, fontWeight:700, color:T.amber }}>{inProdCount}{mobile?"":" em produção"}</span>
+                </div>
+              )}
+              {!mobile && (
+                <div style={{ display:"flex", alignItems:"center", gap:7, padding:"6px 12px", borderRadius:99, background:T.glass, border:`1px solid ${T.glassBorder}`, backdropFilter:"blur(10px)" }}>
+                  <div style={{ width:6, height:6, borderRadius:"50%", background:"#27ae60", boxShadow:"0 0 6px #27ae60" }}/>
+                  <span style={{ fontSize:11.5, fontWeight:600, color:T.textMid }}>Sistema ativo</span>
+                </div>
+              )}
+            </div>
+          </header>
+
+          {/* Page content */}
+          <main style={{ flex:1, padding:mobile?"14px 14px 90px":"28px 28px 28px", maxWidth:1360, width:"100%" }}>
+            {tab==="dashboard" && <Dashboard orders={orders} onDeliver={handleDeliver} onCancel={handleCancel}/>}
+            {tab==="orders"    && <Orders orders={orders} setOrders={setOrders} products={products} toast={toast}/>}
+            {tab==="products"  && <Products products={products} setProducts={setProducts} toast={toast}/>}
+          </main>
+        </div>
+      </div>
+
+      {/* ── MOBILE BOTTOM NAV ── */}
+      {mobile && (
+        <nav className="bottom-nav" style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:60, background:"rgba(255,255,255,.92)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", borderTop:"1px solid rgba(255,255,255,.9)", boxShadow:"0 -4px 24px rgba(80,14,14,.08)", display:"flex", alignItems:"stretch", minHeight:60 }}>
+          {nav.map(n=><BottomNavItem key={n.id} n={n} active={tab===n.id} badge={n.badge} onClick={()=>setTab(n.id)}/>)}
+        </nav>
+      )}
+
+      <Toast msg={toastMsg} type={toastType} onDone={()=>setToastMsg("")}/>
+    </>
+  );
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>
